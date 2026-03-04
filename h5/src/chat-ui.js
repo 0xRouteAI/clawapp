@@ -51,6 +51,23 @@ const SVG_MIC = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
 let _recognition = null
 let _isRecording = false
 
+function shouldAutoFocusInput() {
+  const ua = navigator.userAgent || ''
+  const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(ua)
+  const isCoarsePointer = !!window.matchMedia?.('(pointer: coarse)').matches
+  return !(isMobileUA || isCoarsePointer)
+}
+
+function focusInputIfDesktop() {
+  if (!_textarea || !shouldAutoFocusInput()) return
+  requestAnimationFrame(() => _textarea?.focus())
+}
+
+function blurInputIfMobile() {
+  if (!_textarea || shouldAutoFocusInput()) return
+  _textarea.blur()
+}
+
 /** 从 OpenClaw 消息中提取可渲染内容（文本 + 图片 + 视频 + 音频 + 文件） */
 function extractContent(message) {
   if (!message || typeof message !== 'object') return null
@@ -244,7 +261,7 @@ export function initChatUI(onSettings) {
   }
 
   initCommands((cmd, fillOnly) => {
-    if (fillOnly) { _textarea.value = cmd; _textarea.focus(); updateSendState() }
+    if (fillOnly) { _textarea.value = cmd; focusInputIfDesktop(); updateSendState() }
     else { _textarea.value = cmd; sendMessage() }
   })
 
@@ -288,7 +305,7 @@ function toggleVoiceInput(SR) {
     _isRecording = false
     micBtn.classList.remove('recording')
     _recognition = null
-    _textarea.focus()
+    focusInputIfDesktop()
   }
   _recognition.onerror = (e) => {
     _isRecording = false
@@ -347,6 +364,7 @@ function handleSendClick() {
     wsClient.chatAbort(_sessionKey, _currentRunId).catch(() => {})
     return
   }
+  blurInputIfMobile()
   sendMessage()
 }
 
@@ -411,7 +429,7 @@ async function doSend(text, attachments) {
   } finally {
     _isSending = false
     _textarea.disabled = false
-    _textarea.focus()
+    focusInputIfDesktop()
   }
 }
 
@@ -438,7 +456,7 @@ function processMessageQueue() {
     .finally(() => {
       _isSending = false
       _textarea.disabled = false
-      _textarea.focus()
+      focusInputIfDesktop()
     })
 }
 
