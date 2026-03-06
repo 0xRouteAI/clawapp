@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { randomUUID, generateKeyPairSync, createHash, sign as ed25519Sign, createPrivateKey } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, createReadStream, statSync } from 'fs';
+import { PicoClawAdapter } from './picoclaw-adapter.js';
 
 // 加载环境变量
 config({ path: join(dirname(fileURLToPath(import.meta.url)), '.env') });
@@ -28,9 +29,14 @@ const __dirname = dirname(__filename);
 const CONFIG = {
   port: parseInt(process.env.PROXY_PORT, 10) || 3210,
   proxyToken: process.env.PROXY_TOKEN || '',
+  backendType: process.env.BACKEND_TYPE || 'openclaw', // 'openclaw' or 'picoclaw'
+  // OpenClaw 配置
   gatewayUrl: process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789',
   gatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN || '',
   gatewayPassword: process.env.OPENCLAW_GATEWAY_PASSWORD || '',
+  // PicoClaw 配置
+  picoclawUrl: process.env.PICOCLAW_GATEWAY_URL || 'ws://127.0.0.1:18790/pico/ws',
+  picoclawToken: process.env.PICOCLAW_GATEWAY_TOKEN || '',
   mediaAllowAll: process.env.MEDIA_ALLOW_ALL === '1',
   h5DistPath: join(__dirname, '../h5/dist'),
 };
@@ -198,6 +204,12 @@ function cleanupSession(sid) {
   if (session.sseRes && !session.sseRes.writableEnded) {
     session.sseRes.end();
   }
+  // 清理 PicoClaw 适配器
+  if (session.picoclawAdapter) {
+    session.picoclawAdapter.disconnect();
+    session.picoclawAdapter = null;
+  }
+  // 清理 OpenClaw 连接
   if (session.upstream && session.upstream.readyState !== WebSocket.CLOSED) {
     session.upstream.close();
   }
@@ -343,11 +355,18 @@ function handleUpstreamMessage(sid, rawData) {
 
 /**
  * 建立到 Gateway 的上游 WS 连接，返回 Promise（握手完成后 resolve）
+ * 支持 OpenClaw 和 PicoClaw 两种后端
  */
 function connectToGateway(sid) {
   const session = sessions.get(sid);
   if (!session) return Promise.reject(new Error('会话不存在'));
 
+  // PicoClaw 模式
+  if (CONFIG.backendType === 'picoclaw') {
+    return connectToPicoClaw(sid);
+  }
+
+  // OpenClaw 模式（原有逻辑）
   return new Promise((resolve, reject) => {
     session._connectResolve = resolve;
     session._connectReject = reject;
@@ -397,6 +416,41 @@ function connectToGateway(sid) {
       }
     }, 30000);
   });
+}
+
+/**
+ * 连接到 PicoClaw Gateway
+ */
+async function connectToPicoClaw(sid) {
+  const session = sessions.get(sid);
+  if (!session) throw new Error('会话不存在');
+
+  log.info(`[PicoClaw] 连接到 ${CONFIG.picoclawUrl} [${sid}]`);
+  
+  const adapter = new PicoClawAdapter(CONFIG.picoclawUrl, CONFIG.picoclawToken, log);
+  session.picoclawAdapter = adapter;
+  session.state = 'connecting';
+
+  // 监听 PicoClaw 事件并转发到 SSE
+  adapter.on((event) => {
+    if (event.type === 'event') {
+      sseWrite(session, 'message', event);
+    }
+  });
+
+  try {
+    const result = await adapter.connect();
+    session.state = 'connected';
+    session.hello = result.hello;
+    session.snapshot = result.snapshot;
+    
+    log.info(`[PicoClaw] 连接成功 [${sid}]`);
+    return result;
+  } catch (err) {
+    session.state = 'error';
+    log.error(`[PicoClaw] 连接失败 [${sid}]:`, err.message);
+    throw err;
+  }
 }
 
 // ==================== Node 客户端（system.notify 接收端）====================
@@ -951,11 +1005,51 @@ app.post('/api/send', async (req, res) => {
   if (session.state !== 'connected') {
     return res.status(400).json({ ok: false, error: '会话未就绪' });
   }
+
+  session.lastActivity = Date.now();
+
+  // PicoClaw 模式
+  if (CONFIG.backendType === 'picoclaw' && session.picoclawAdapter) {
+    try {
+      if (method === 'chat.send') {
+        const content = params?.messages?.[0]?.content || params?.content || '';
+        const sessionKey = params?.sessionKey || session.picoclawAdapter.sessionId;
+        
+        setSessionProgress(session, {
+          isBusy: true,
+          sessionKey,
+          runId: '',
+          state: 'sending',
+        });
+
+        const result = await session.picoclawAdapter.sendMessage(sessionKey, content);
+        return res.json({ ok: true, payload: result });
+      }
+      
+      if (method === 'chat.history') {
+        const sessionKey = params?.sessionKey || session.picoclawAdapter.sessionId;
+        const result = await session.picoclawAdapter.getHistory(sessionKey);
+        return res.json({ ok: true, payload: result });
+      }
+
+      if (method === 'chat.abort') {
+        const sessionKey = params?.sessionKey;
+        const runId = params?.runId;
+        await session.picoclawAdapter.abort(sessionKey, runId);
+        return res.json({ ok: true, payload: {} });
+      }
+
+      return res.status(400).json({ ok: false, error: `不支持的方法: ${method}` });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  }
+
+  // OpenClaw 模式（原有逻辑）
   if (!session.upstream || session.upstream.readyState !== WebSocket.OPEN) {
     return res.status(502).json({ ok: false, error: 'Gateway 连接已断开' });
   }
 
-  session.lastActivity = Date.now();
   const reqId = `rpc-${randomUUID()}`;
 
   log.info(`RPC 请求 [${sid}] id=${reqId} method=${method}`);
@@ -1052,12 +1146,18 @@ const server = createServer(app);
 
 server.listen(CONFIG.port, () => {
   log.info(`代理服务端已启动: http://0.0.0.0:${CONFIG.port}`);
-  log.info(`架构: 手机 ←SSE+POST→ 代理服务端 ←WS→ Gateway(${CONFIG.gatewayUrl})`);
-  log.info(`operator 设备 ID: ${deviceKey.deviceId.slice(0, 12)}...`);
-  log.info(`node 设备 ID: ${nodeDeviceKey.deviceId.slice(0, 12)}... (system.notify 接收端)`);
-  // 先启动后台 operator（负责审批 node 设备配对），再延迟 2s 启动 node 客户端
-  startBgOperator();
-  setTimeout(startNodeClient, 2000);
+  log.info(`后端类型: ${CONFIG.backendType.toUpperCase()}`);
+  
+  if (CONFIG.backendType === 'picoclaw') {
+    log.info(`架构: 手机 ←SSE+POST→ 代理服务端 ←WS→ PicoClaw(${CONFIG.picoclawUrl})`);
+  } else {
+    log.info(`架构: 手机 ←SSE+POST→ 代理服务端 ←WS→ OpenClaw Gateway(${CONFIG.gatewayUrl})`);
+    log.info(`operator 设备 ID: ${deviceKey.deviceId.slice(0, 12)}...`);
+    log.info(`node 设备 ID: ${nodeDeviceKey.deviceId.slice(0, 12)}... (system.notify 接收端)`);
+    // 先启动后台 operator（负责审批 node 设备配对），再延迟 2s 启动 node 客户端
+    startBgOperator();
+    setTimeout(startNodeClient, 2000);
+  }
 });
 
 // 优雅关闭

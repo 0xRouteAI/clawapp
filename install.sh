@@ -23,7 +23,7 @@ banner() {
   echo ""
   echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
   echo -e "${CYAN}║${NC}     🐾 ${GREEN}ClawApp 一键部署工具${NC}          ${CYAN}║${NC}"
-  echo -e "${CYAN}║${NC}     OpenClaw AI 移动端客户端       ${CYAN}║${NC}"
+  echo -e "${CYAN}║${NC}     OpenClaw / PicoClaw 移动端客户端 ${CYAN}║${NC}"
   echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
   echo ""
 }
@@ -201,6 +201,52 @@ detect_openclaw() {
   fi
 }
 
+# ========== 检测 PicoClaw ==========
+detect_picoclaw() {
+  PICOCLAW_TOKEN=""
+  PICOCLAW_URL="ws://127.0.0.1:18790/pico/ws"
+
+  # 尝试从配置文件读取 Token
+  PICOCLAW_CONFIG="$HOME/.picoclaw/config.json"
+  if [ -f "$PICOCLAW_CONFIG" ]; then
+    ok "检测到本地 PicoClaw 安装"
+    PICOCLAW_TOKEN=$(node -e "
+      try {
+        const c = require('$PICOCLAW_CONFIG');
+        if (c.channels && c.channels.pico && c.channels.pico.token) {
+          process.stdout.write(c.channels.pico.token);
+        }
+      } catch(e) {}
+    " 2>/dev/null || true)
+
+    PICOCLAW_PORT=$(node -e "
+      try {
+        const c = require('$PICOCLAW_CONFIG');
+        if (c.gateway && c.gateway.port) {
+          process.stdout.write(String(c.gateway.port));
+        }
+      } catch(e) {}
+    " 2>/dev/null || true)
+
+    if [ -n "$PICOCLAW_PORT" ]; then
+      PICOCLAW_URL="ws://127.0.0.1:$PICOCLAW_PORT/pico/ws"
+    fi
+
+    if [ -n "$PICOCLAW_TOKEN" ]; then
+      ok "已自动读取 PicoClaw Token"
+    fi
+  fi
+
+  # 检测 Gateway 是否在运行
+  if curl -s --connect-timeout 2 "http://127.0.0.1:${PICOCLAW_PORT:-18790}/health" &>/dev/null; then
+    ok "PicoClaw Gateway 正在运行 (端口 ${PICOCLAW_PORT:-18790})"
+    PICOCLAW_RUNNING=true
+  else
+    warn "PicoClaw Gateway 未运行"
+    PICOCLAW_RUNNING=false
+  fi
+}
+
 # ========== 安装 OpenClaw（可选）==========
 offer_install_openclaw() {
   if [ "$GATEWAY_RUNNING" = true ]; then
@@ -271,6 +317,75 @@ configure() {
   info "配置 ClawApp"
   echo ""
 
+  # 选择后端类型
+  echo "  选择 AI 后端:"
+  echo ""
+  echo "  1) OpenClaw  (功能完整，内存 ~1GB)"
+  echo "  2) PicoClaw  (超轻量级，内存 <10MB)"
+  echo ""
+  ask "请选择 [1/2]: "
+  read -r backend_choice
+  echo ""
+
+  if [ "$backend_choice" = "2" ]; then
+    BACKEND_TYPE="picoclaw"
+    info "已选择: PicoClaw"
+    
+    # PicoClaw Token
+    if [ -n "$PICOCLAW_TOKEN" ]; then
+      ask "PicoClaw Token (已自动检测，直接回车使用，或输入新的): "
+      read -r input_pico_token
+      if [ -n "$input_pico_token" ]; then
+        PICOCLAW_TOKEN="$input_pico_token"
+      fi
+    else
+      ask "PicoClaw Token (在 ~/.picoclaw/config.json 中查找): "
+      read -r PICOCLAW_TOKEN
+      if [ -z "$PICOCLAW_TOKEN" ]; then
+        warn "Token 为空，将生成随机 Token"
+        PICOCLAW_TOKEN=$(openssl rand -hex 24 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(24).toString('hex'))")
+        echo ""
+        warn "请将此 Token 添加到 PicoClaw 配置文件 ~/.picoclaw/config.json:"
+        echo ""
+        echo "  {\"channels\": {\"pico\": {\"enabled\": true, \"token\": \"$PICOCLAW_TOKEN\"}}}"
+        echo ""
+      fi
+    fi
+
+    # PicoClaw URL
+    ask "PicoClaw Gateway 地址 (直接回车使用 $PICOCLAW_URL): "
+    read -r input_pico_url
+    if [ -n "$input_pico_url" ]; then
+      PICOCLAW_URL="$input_pico_url"
+    fi
+  else
+    BACKEND_TYPE="openclaw"
+    info "已选择: OpenClaw"
+    
+    # Gateway Token
+    if [ -n "$GATEWAY_TOKEN" ]; then
+      ask "Gateway Token (已自动检测，直接回车使用，或输入新的): "
+      read -r input_gw_token
+      if [ -n "$input_gw_token" ]; then
+        GATEWAY_TOKEN="$input_gw_token"
+      fi
+    else
+      ask "Gateway Token (在 ~/.openclaw/openclaw.json 中查找): "
+      read -r GATEWAY_TOKEN
+      if [ -z "$GATEWAY_TOKEN" ]; then
+        err "Gateway Token 不能为空"
+        exit 1
+      fi
+    fi
+
+    # Gateway URL
+    ask "Gateway 地址 (直接回车使用 $GATEWAY_URL): "
+    read -r input_gw_url
+    if [ -n "$input_gw_url" ]; then
+      GATEWAY_URL="$input_gw_url"
+    fi
+  fi
+
   # Proxy Token
   ask "设置客户端连接密码 (PROXY_TOKEN，直接回车生成随机密码): "
   read -r input_proxy_token
@@ -281,41 +396,29 @@ configure() {
     PROXY_TOKEN="$input_proxy_token"
   fi
 
-  # Gateway Token
-  if [ -n "$GATEWAY_TOKEN" ]; then
-    ask "Gateway Token (已自动检测，直接回车使用，或输入新的): "
-    read -r input_gw_token
-    if [ -n "$input_gw_token" ]; then
-      GATEWAY_TOKEN="$input_gw_token"
-    fi
-  else
-    ask "Gateway Token (在 ~/.openclaw/openclaw.json 中查找): "
-    read -r GATEWAY_TOKEN
-    if [ -z "$GATEWAY_TOKEN" ]; then
-      err "Gateway Token 不能为空"
-      exit 1
-    fi
-  fi
-
-  # Gateway URL
-  ask "Gateway 地址 (直接回车使用 $GATEWAY_URL): "
-  read -r input_gw_url
-  if [ -n "$input_gw_url" ]; then
-    GATEWAY_URL="$input_gw_url"
-  fi
-
   # 端口
   ask "服务端口 (直接回车使用 3210): "
   read -r input_port
   PROXY_PORT="${input_port:-3210}"
 
   # 写入 .env
-  cat > "$ENV_FILE" << EOF
+  if [ "$BACKEND_TYPE" = "picoclaw" ]; then
+    cat > "$ENV_FILE" << EOF
+BACKEND_TYPE=picoclaw
+PROXY_PORT=$PROXY_PORT
+PROXY_TOKEN=$PROXY_TOKEN
+PICOCLAW_GATEWAY_URL=$PICOCLAW_URL
+PICOCLAW_GATEWAY_TOKEN=$PICOCLAW_TOKEN
+EOF
+  else
+    cat > "$ENV_FILE" << EOF
+BACKEND_TYPE=openclaw
 PROXY_PORT=$PROXY_PORT
 PROXY_TOKEN=$PROXY_TOKEN
 OPENCLAW_GATEWAY_URL=$GATEWAY_URL
 OPENCLAW_GATEWAY_TOKEN=$GATEWAY_TOKEN
 EOF
+  fi
 
   ok "配置已保存到 $ENV_FILE"
 }
@@ -379,12 +482,22 @@ finish() {
   echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
   echo ""
   echo "  📂 安装目录: $INSTALL_DIR"
+  echo "  🤖 后端类型: $BACKEND_TYPE"
   echo "  🔑 连接密码: $PROXY_TOKEN"
   echo ""
   echo "  📱 手机访问: http://$LOCAL_IP:$PROXY_PORT"
   echo "  💻 本机访问: http://localhost:$PROXY_PORT"
   echo ""
-  echo "  📖 文档: https://github.com/qingchencloud/clawapp"
+  if [ "$BACKEND_TYPE" = "picoclaw" ]; then
+    echo "  � 提示: 请确保 PicoClaw Gateway 正在运行"
+    echo "     启动命令: picoclaw gateway"
+    echo ""
+  else
+    echo "  💡 提示: 请确保 OpenClaw Gateway 正在运行"
+    echo "     启动命令: openclaw"
+    echo ""
+  fi
+  echo "  � 文档: https://github.com/qingchencloud/clawapp"
   echo "  💬 社区: https://discord.com/invite/U9AttmsNHh"
   echo ""
 }
@@ -404,8 +517,9 @@ main() {
   # 检测 Node.js
   check_node || install_node
 
-  # 检测 OpenClaw
+  # 检测 OpenClaw 和 PicoClaw
   detect_openclaw
+  detect_picoclaw
 
   # 可选安装 OpenClaw
   offer_install_openclaw

@@ -33,10 +33,16 @@
 
 <h2 id="about">这是什么？</h2>
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个强大的 AI 智能体平台（[中文汉化版](https://github.com/1186258278/OpenClawChineseTranslation)），但它的 Gateway 默认只监听本机（`127.0.0.1:18789`），手机无法直接连接。
+ClawApp 是一个移动端 AI 聊天客户端，支持连接到 [OpenClaw](https://github.com/openclaw/openclaw) 和 [PicoClaw](https://github.com/sipeed/picoclaw) 两种 AI 智能体平台。
 
-ClawApp 解决了这个问题：
+### 支持的后端
 
+- **OpenClaw**: 强大的 AI 智能体平台（[中文汉化版](https://github.com/1186258278/OpenClawChineseTranslation)）
+- **PicoClaw**: 超轻量级 AI 助手（Go 语言实现，内存占用 <10MB）
+
+### 架构
+
+**OpenClaw 模式：**
 ```
 手机浏览器（任意网络）
     ↓ WebSocket (WS / WSS)
@@ -45,7 +51,16 @@ ClawApp 解决了这个问题：
 OpenClaw Gateway（端口 18789）
 ```
 
-代理服务端自动完成 Ed25519 设备签名握手认证（兼容 OpenClaw 2.13+），同时提供 H5 聊天页面，打开就能用，不需要装 App。
+**PicoClaw 模式：**
+```
+手机浏览器（任意网络）
+    ↓ WebSocket (WS / WSS)
+代理服务端（ClawApp Server，端口 3210，离线缓存）
+    ↓ Pico Protocol (WebSocket + Bearer Token)
+PicoClaw Gateway（端口 18790）
+```
+
+> 💡 **新功能**: 现在支持 PicoClaw！查看 [PicoClaw 配置指南](./PICOCLAW_SUPPORT.md) 了解详情。
 
 ---
 

@@ -17,7 +17,7 @@ function Show-Banner {
     Write-Host ""
     Write-Host "+======================================+" -ForegroundColor Cyan
     Write-Host "|     ClawApp 一键部署工具              |" -ForegroundColor Cyan
-    Write-Host "|     OpenClaw AI 移动端客户端          |" -ForegroundColor Cyan
+    Write-Host "|     OpenClaw / PicoClaw 移动端客户端  |" -ForegroundColor Cyan
     Write-Host "+======================================+" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -128,6 +128,9 @@ function Install-Git {
 $script:GatewayToken = ""
 $script:GatewayUrl = "ws://127.0.0.1:18789"
 $script:GatewayRunning = $false
+$script:PicoClawToken = ""
+$script:PicoClawUrl = "ws://127.0.0.1:18790/pico/ws"
+$script:PicoClawRunning = $false
 
 function Find-OpenClaw {
     $configPath = Join-Path $env:USERPROFILE ".openclaw" "openclaw.json"
@@ -160,6 +163,40 @@ function Find-OpenClaw {
     catch {
         Write-Warn "OpenClaw Gateway 未运行"
         $script:GatewayRunning = $false
+    }
+}
+
+function Find-PicoClaw {
+    $configPath = Join-Path $env:USERPROFILE ".picoclaw" "config.json"
+
+    if (Test-Path $configPath) {
+        Write-Ok "检测到本地 PicoClaw 安装"
+        try {
+            $configText = Get-Content $configPath -Raw -Encoding UTF8
+            $config = $configText | ConvertFrom-Json
+
+            if ($config.channels.pico.token) {
+                $script:PicoClawToken = $config.channels.pico.token
+                Write-Ok "已自动读取 PicoClaw Token"
+            }
+            if ($config.gateway.port) {
+                $script:PicoClawUrl = "ws://127.0.0.1:$($config.gateway.port)/pico/ws"
+            }
+        }
+        catch {
+            Write-Warn "读取 PicoClaw 配置失败: $_"
+        }
+    }
+
+    $picoPort = if ($config.gateway.port) { $config.gateway.port } else { 18790 }
+    try {
+        $null = Invoke-WebRequest -Uri "http://127.0.0.1:${picoPort}/health" -TimeoutSec 2 -ErrorAction Stop
+        Write-Ok "PicoClaw Gateway 正在运行 (端口 $picoPort)"
+        $script:PicoClawRunning = $true
+    }
+    catch {
+        Write-Warn "PicoClaw Gateway 未运行"
+        $script:PicoClawRunning = $false
     }
 }
 
@@ -237,6 +274,82 @@ function Set-Config {
     Write-Info "配置 ClawApp"
     Write-Host ""
 
+    # 选择后端类型
+    Write-Host "  选择 AI 后端:"
+    Write-Host ""
+    Write-Host "  1) OpenClaw  (功能完整，内存 ~1GB)"
+    Write-Host "  2) PicoClaw  (超轻量级，内存 <10MB)"
+    Write-Host ""
+    Write-Ask "请选择 [1/2]: "
+    $backendChoice = Read-Host
+    Write-Host ""
+
+    $backendType = "openclaw"
+    if ($backendChoice -eq "2") {
+        $backendType = "picoclaw"
+        Write-Info "已选择: PicoClaw"
+
+        # PicoClaw Token
+        if (-not [string]::IsNullOrWhiteSpace($script:PicoClawToken)) {
+            Write-Ask "PicoClaw Token (已自动检测，直接回车使用，或输入新的): "
+            $inputPicoToken = Read-Host
+            if (-not [string]::IsNullOrWhiteSpace($inputPicoToken)) {
+                $script:PicoClawToken = $inputPicoToken
+            }
+        }
+        else {
+            Write-Ask "PicoClaw Token (在 ~/.picoclaw/config.json 中查找): "
+            $script:PicoClawToken = Read-Host
+            if ([string]::IsNullOrWhiteSpace($script:PicoClawToken)) {
+                Write-Warn "Token 为空，将生成随机 Token"
+                $bytes = New-Object byte[] 24
+                [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+                $script:PicoClawToken = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ""
+                Write-Host ""
+                Write-Warn "请将此 Token 添加到 PicoClaw 配置文件 ~/.picoclaw/config.json:"
+                Write-Host ""
+                Write-Host "  {`"channels`": {`"pico`": {`"enabled`": true, `"token`": `"$($script:PicoClawToken)`"}}}"
+                Write-Host ""
+            }
+        }
+
+        # PicoClaw URL
+        Write-Ask "PicoClaw Gateway 地址 (直接回车使用 $($script:PicoClawUrl)): "
+        $inputPicoUrl = Read-Host
+        if (-not [string]::IsNullOrWhiteSpace($inputPicoUrl)) {
+            $script:PicoClawUrl = $inputPicoUrl
+        }
+    }
+    else {
+        $backendType = "openclaw"
+        Write-Info "已选择: OpenClaw"
+
+        # Gateway Token
+        if (-not [string]::IsNullOrWhiteSpace($script:GatewayToken)) {
+            Write-Ask "Gateway Token (已自动检测，直接回车使用，或输入新的): "
+            $inputGwToken = Read-Host
+            if (-not [string]::IsNullOrWhiteSpace($inputGwToken)) {
+                $script:GatewayToken = $inputGwToken
+            }
+        }
+        else {
+            Write-Ask "Gateway Token (在 ~/.openclaw/openclaw.json 中查找): "
+            $script:GatewayToken = Read-Host
+            if ([string]::IsNullOrWhiteSpace($script:GatewayToken)) {
+                Write-Err "Gateway Token 不能为空"
+                exit 1
+            }
+        }
+
+        # Gateway URL
+        Write-Ask "Gateway 地址 (直接回车使用 $($script:GatewayUrl)): "
+        $inputGwUrl = Read-Host
+        if (-not [string]::IsNullOrWhiteSpace($inputGwUrl)) {
+            $script:GatewayUrl = $inputGwUrl
+        }
+    }
+
+    # Proxy Token
     Write-Ask "设置客户端连接密码 (PROXY_TOKEN，直接回车生成随机密码): "
     $inputProxyToken = Read-Host
     if ([string]::IsNullOrWhiteSpace($inputProxyToken)) {
@@ -249,44 +362,38 @@ function Set-Config {
         $proxyToken = $inputProxyToken
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($script:GatewayToken)) {
-        Write-Ask "Gateway Token (已自动检测，直接回车使用，或输入新的): "
-        $inputGwToken = Read-Host
-        if (-not [string]::IsNullOrWhiteSpace($inputGwToken)) {
-            $script:GatewayToken = $inputGwToken
-        }
-    }
-    else {
-        Write-Ask "Gateway Token (在 ~/.openclaw/openclaw.json 中查找): "
-        $script:GatewayToken = Read-Host
-        if ([string]::IsNullOrWhiteSpace($script:GatewayToken)) {
-            Write-Err "Gateway Token 不能为空"
-            exit 1
-        }
-    }
-
-    Write-Ask "Gateway 地址 (直接回车使用 $($script:GatewayUrl)): "
-    $inputGwUrl = Read-Host
-    if (-not [string]::IsNullOrWhiteSpace($inputGwUrl)) {
-        $script:GatewayUrl = $inputGwUrl
-    }
-
+    # 端口
     Write-Ask "服务端口 (直接回车使用 3210): "
     $inputPort = Read-Host
     $proxyPort = if ([string]::IsNullOrWhiteSpace($inputPort)) { "3210" } else { $inputPort }
 
-    $envContent = @"
+    # 写入 .env
+    if ($backendType -eq "picoclaw") {
+        $envContent = @"
+BACKEND_TYPE=picoclaw
+PROXY_PORT=$proxyPort
+PROXY_TOKEN=$proxyToken
+PICOCLAW_GATEWAY_URL=$($script:PicoClawUrl)
+PICOCLAW_GATEWAY_TOKEN=$($script:PicoClawToken)
+"@
+    }
+    else {
+        $envContent = @"
+BACKEND_TYPE=openclaw
 PROXY_PORT=$proxyPort
 PROXY_TOKEN=$proxyToken
 OPENCLAW_GATEWAY_URL=$($script:GatewayUrl)
 OPENCLAW_GATEWAY_TOKEN=$($script:GatewayToken)
 "@
+    }
+
     [System.IO.File]::WriteAllText($envFile, $envContent, [System.Text.UTF8Encoding]::new($false))
 
     Write-Ok "配置已保存到 $envFile"
 
     $script:ProxyToken = $proxyToken
     $script:ProxyPort = $proxyPort
+    $script:BackendType = $backendType
 }
 
 function Start-ClawApp {
@@ -349,11 +456,22 @@ function Show-Finish {
     Write-Host "+======================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host "  安装目录: $InstallDir"
+    Write-Host "  后端类型: $($script:BackendType)"
     Write-Host "  连接密码: $($script:ProxyToken)"
     Write-Host ""
     Write-Host "  手机访问: http://${localIp}:$($script:ProxyPort)"
     Write-Host "  本机访问: http://localhost:$($script:ProxyPort)"
     Write-Host ""
+    if ($script:BackendType -eq "picoclaw") {
+        Write-Host "  提示: 请确保 PicoClaw Gateway 正在运行" -ForegroundColor Yellow
+        Write-Host "     启动命令: picoclaw gateway"
+        Write-Host ""
+    }
+    else {
+        Write-Host "  提示: 请确保 OpenClaw Gateway 正在运行" -ForegroundColor Yellow
+        Write-Host "     启动命令: openclaw"
+        Write-Host ""
+    }
     Write-Host "  文档: https://github.com/qingchencloud/clawapp"
     Write-Host "  社区: https://discord.com/invite/U9AttmsNHh"
     Write-Host ""
@@ -371,6 +489,7 @@ function Main {
     if (-not (Test-NodeJS)) { Install-NodeJS }
 
     Find-OpenClaw
+    Find-PicoClaw
     Install-OpenClawOptional
 
     Write-Host ""
