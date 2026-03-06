@@ -19,6 +19,20 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 err()   { echo -e "${RED}[✗]${NC} $1"; }
 ask()   { echo -en "${CYAN}[?]${NC} $1"; }
 
+read_input() {
+  local __var_name="$1"
+  local __value=""
+
+  # Support interactive prompts even when the script itself is piped into bash.
+  if [ -r /dev/tty ]; then
+    IFS= read -r __value </dev/tty || true
+  else
+    IFS= read -r __value || true
+  fi
+
+  printf -v "$__var_name" '%s' "$__value"
+}
+
 banner() {
   echo ""
   echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
@@ -74,7 +88,7 @@ install_node() {
   echo "  2) 我自己安装 (退出脚本)"
   echo ""
   ask "请选择 [1/2]: "
-  read -r choice
+  read_input choice
   echo ""
 
   case "$choice" in
@@ -295,7 +309,7 @@ configure() {
   echo "  2) PicoClaw  (超轻量级，内存 <10MB)"
   echo ""
   ask "请选择 [1/2]: "
-  read -r backend_choice
+  read_input backend_choice
   echo ""
 
   if [ "$backend_choice" = "2" ]; then
@@ -312,7 +326,7 @@ configure() {
       echo "    picoclaw gateway"
       echo ""
       ask "是否继续配置（稍后手动启动 PicoClaw）？[Y/n]: "
-      read -r continue_choice
+      read_input continue_choice
       if [ "$continue_choice" = "n" ] || [ "$continue_choice" = "N" ]; then
         info "已取消"
         exit 0
@@ -322,13 +336,13 @@ configure() {
     # PicoClaw Token
     if [ -n "$PICOCLAW_TOKEN" ]; then
       ask "PicoClaw Token (已自动检测，直接回车使用，或输入新的): "
-      read -r input_pico_token
+      read_input input_pico_token
       if [ -n "$input_pico_token" ]; then
         PICOCLAW_TOKEN="$input_pico_token"
       fi
     else
       ask "PicoClaw Token (在 ~/.picoclaw/config.json 中查找): "
-      read -r PICOCLAW_TOKEN
+      read_input PICOCLAW_TOKEN
       if [ -z "$PICOCLAW_TOKEN" ]; then
         warn "Token 为空，将生成随机 Token"
         PICOCLAW_TOKEN=$(openssl rand -hex 24 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(24).toString('hex'))")
@@ -342,7 +356,7 @@ configure() {
 
     # PicoClaw URL
     ask "PicoClaw Gateway 地址 (直接回车使用 $PICOCLAW_URL): "
-    read -r input_pico_url
+    read_input input_pico_url
     if [ -n "$input_pico_url" ]; then
       PICOCLAW_URL="$input_pico_url"
     fi
@@ -359,7 +373,7 @@ configure() {
       echo "  2) 跳过，我稍后自己安装"
       echo ""
       ask "请选择 [1/2]: "
-      read -r install_choice
+      read_input install_choice
       echo ""
       
       if [ "$install_choice" = "1" ]; then
@@ -377,13 +391,13 @@ configure() {
     # Gateway Token
     if [ -n "$GATEWAY_TOKEN" ]; then
       ask "Gateway Token (已自动检测，直接回车使用，或输入新的): "
-      read -r input_gw_token
+      read_input input_gw_token
       if [ -n "$input_gw_token" ]; then
         GATEWAY_TOKEN="$input_gw_token"
       fi
     else
       ask "Gateway Token (在 ~/.openclaw/openclaw.json 中查找): "
-      read -r GATEWAY_TOKEN
+      read_input GATEWAY_TOKEN
       if [ -z "$GATEWAY_TOKEN" ]; then
         err "Gateway Token 不能为空"
         exit 1
@@ -392,7 +406,7 @@ configure() {
 
     # Gateway URL
     ask "Gateway 地址 (直接回车使用 $GATEWAY_URL): "
-    read -r input_gw_url
+    read_input input_gw_url
     if [ -n "$input_gw_url" ]; then
       GATEWAY_URL="$input_gw_url"
     fi
@@ -400,7 +414,7 @@ configure() {
 
   # Proxy Token
   ask "设置客户端连接密码 (PROXY_TOKEN，直接回车生成随机密码): "
-  read -r input_proxy_token
+  read_input input_proxy_token
   if [ -z "$input_proxy_token" ]; then
     PROXY_TOKEN=$(openssl rand -hex 16 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(16).toString('hex'))")
     info "已生成随机密码: $PROXY_TOKEN"
@@ -410,7 +424,7 @@ configure() {
 
   # 端口
   ask "服务端口 (直接回车使用 3210): "
-  read -r input_port
+  read_input input_port
   PROXY_PORT="${input_port:-3210}"
 
   # 写入 .env
@@ -445,7 +459,7 @@ start_server() {
   echo "  3) 不启动，稍后手动启动"
   echo ""
   ask "请选择 [1/2/3]: "
-  read -r choice
+  read_input choice
   echo ""
 
   case "$choice" in
@@ -536,7 +550,7 @@ main() {
   echo ""
   info "安装目录: $INSTALL_DIR"
   ask "确认开始安装？[Y/n]: "
-  read -r confirm
+  read_input confirm
   if [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
     info "已取消"
     exit 0
