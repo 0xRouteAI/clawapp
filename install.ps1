@@ -200,33 +200,6 @@ function Find-PicoClaw {
     }
 }
 
-function Install-OpenClawOptional {
-    if ($script:GatewayRunning) { return }
-
-    $configPath = Join-Path $env:USERPROFILE ".openclaw" "openclaw.json"
-    if (-not (Test-Path $configPath)) {
-        Write-Host ""
-        Write-Warn "未检测到 OpenClaw，ClawApp 需要 OpenClaw Gateway 才能工作"
-        Write-Host ""
-        Write-Host "  1) 自动安装 OpenClaw (npm install -g openclaw)"
-        Write-Host "  2) 跳过，我稍后自己安装"
-        Write-Host ""
-        Write-Ask "请选择 [1/2]: "
-        $choice = Read-Host
-
-        if ($choice -eq "1") {
-            Write-Info "正在安装 OpenClaw..."
-            npm install -g openclaw
-            Write-Ok "OpenClaw 安装完成，请运行 'openclaw' 启动后再使用 ClawApp"
-        }
-        else {
-            Write-Warn "请确保 OpenClaw Gateway 运行后再使用 ClawApp"
-            Write-Host "  安装: npm install -g openclaw"
-            Write-Host "  启动: openclaw"
-        }
-    }
-}
-
 function Setup-Repo {
     if (Test-Path (Join-Path $InstallDir ".git")) {
         Write-Info "检测到已有安装，正在更新..."
@@ -289,6 +262,24 @@ function Set-Config {
         $backendType = "picoclaw"
         Write-Info "已选择: PicoClaw"
 
+        # 检查 PicoClaw 是否安装
+        $picoConfigPath = Join-Path $env:USERPROFILE ".picoclaw" "config.json"
+        if ((-not $script:PicoClawRunning) -and (-not (Test-Path $picoConfigPath))) {
+            Write-Host ""
+            Write-Warn "未检测到 PicoClaw 安装"
+            Write-Host ""
+            Write-Host "  请先安装 PicoClaw:"
+            Write-Host "    npm install -g picoclaw"
+            Write-Host "    picoclaw gateway"
+            Write-Host ""
+            Write-Ask "是否继续配置（稍后手动启动 PicoClaw）？[Y/n]: "
+            $continueChoice = Read-Host
+            if ($continueChoice -eq "n" -or $continueChoice -eq "N") {
+                Write-Info "已取消"
+                exit 0
+            }
+        }
+
         # PicoClaw Token
         if (-not [string]::IsNullOrWhiteSpace($script:PicoClawToken)) {
             Write-Ask "PicoClaw Token (已自动检测，直接回车使用，或输入新的): "
@@ -323,6 +314,32 @@ function Set-Config {
     else {
         $backendType = "openclaw"
         Write-Info "已选择: OpenClaw"
+
+        # 检查 OpenClaw 是否安装
+        $openclawConfigPath = Join-Path $env:USERPROFILE ".openclaw" "openclaw.json"
+        if ((-not $script:GatewayRunning) -and (-not (Test-Path $openclawConfigPath))) {
+            Write-Host ""
+            Write-Warn "未检测到 OpenClaw 安装"
+            Write-Host ""
+            Write-Host "  1) 自动安装 OpenClaw (npm install -g openclaw)"
+            Write-Host "  2) 跳过，我稍后自己安装"
+            Write-Host ""
+            Write-Ask "请选择 [1/2]: "
+            $installChoice = Read-Host
+            Write-Host ""
+            
+            if ($installChoice -eq "1") {
+                Write-Info "正在安装 OpenClaw..."
+                npm install -g openclaw
+                Write-Ok "OpenClaw 安装完成，请运行 'openclaw' 启动后再使用 ClawApp"
+            }
+            else {
+                Write-Warn "请确保 OpenClaw Gateway 运行后再使用 ClawApp"
+                Write-Host "  安装: npm install -g openclaw"
+                Write-Host "  启动: openclaw"
+            }
+            Write-Host ""
+        }
 
         # Gateway Token
         if (-not [string]::IsNullOrWhiteSpace($script:GatewayToken)) {
@@ -490,7 +507,6 @@ function Main {
 
     Find-OpenClaw
     Find-PicoClaw
-    Install-OpenClawOptional
 
     Write-Host ""
     Write-Info "安装目录: $InstallDir"

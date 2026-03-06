@@ -247,35 +247,6 @@ detect_picoclaw() {
   fi
 }
 
-# ========== 安装 OpenClaw（可选）==========
-offer_install_openclaw() {
-  if [ "$GATEWAY_RUNNING" = true ]; then
-    return 0
-  fi
-
-  if ! [ -f "$HOME/.openclaw/openclaw.json" ]; then
-    echo ""
-    warn "未检测到 OpenClaw，ClawApp 需要 OpenClaw Gateway 才能工作"
-    echo ""
-    echo "  1) 自动安装 OpenClaw (npm install -g openclaw)"
-    echo "  2) 跳过，我稍后自己安装"
-    echo ""
-    ask "请选择 [1/2]: "
-    read -r choice
-    echo ""
-
-    if [ "$choice" = "1" ]; then
-      info "正在安装 OpenClaw..."
-      npm install -g openclaw
-      ok "OpenClaw 安装完成，请运行 'openclaw' 启动后再使用 ClawApp"
-    else
-      warn "请确保 OpenClaw Gateway 运行后再使用 ClawApp"
-      echo "  安装: npm install -g openclaw"
-      echo "  启动: openclaw"
-    fi
-  fi
-}
-
 # ========== 克隆/更新仓库 ==========
 setup_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
@@ -331,6 +302,23 @@ configure() {
     BACKEND_TYPE="picoclaw"
     info "已选择: PicoClaw"
     
+    # 检查 PicoClaw 是否安装
+    if [ "$PICOCLAW_RUNNING" != true ] && ! [ -f "$HOME/.picoclaw/config.json" ]; then
+      echo ""
+      warn "未检测到 PicoClaw 安装"
+      echo ""
+      echo "  请先安装 PicoClaw:"
+      echo "    npm install -g picoclaw"
+      echo "    picoclaw gateway"
+      echo ""
+      ask "是否继续配置（稍后手动启动 PicoClaw）？[Y/n]: "
+      read -r continue_choice
+      if [ "$continue_choice" = "n" ] || [ "$continue_choice" = "N" ]; then
+        info "已取消"
+        exit 0
+      fi
+    fi
+    
     # PicoClaw Token
     if [ -n "$PICOCLAW_TOKEN" ]; then
       ask "PicoClaw Token (已自动检测，直接回车使用，或输入新的): "
@@ -361,6 +349,30 @@ configure() {
   else
     BACKEND_TYPE="openclaw"
     info "已选择: OpenClaw"
+    
+    # 检查 OpenClaw 是否安装
+    if [ "$GATEWAY_RUNNING" != true ] && ! [ -f "$HOME/.openclaw/openclaw.json" ]; then
+      echo ""
+      warn "未检测到 OpenClaw 安装"
+      echo ""
+      echo "  1) 自动安装 OpenClaw (npm install -g openclaw)"
+      echo "  2) 跳过，我稍后自己安装"
+      echo ""
+      ask "请选择 [1/2]: "
+      read -r install_choice
+      echo ""
+      
+      if [ "$install_choice" = "1" ]; then
+        info "正在安装 OpenClaw..."
+        npm install -g openclaw
+        ok "OpenClaw 安装完成，请运行 'openclaw' 启动后再使用 ClawApp"
+      else
+        warn "请确保 OpenClaw Gateway 运行后再使用 ClawApp"
+        echo "  安装: npm install -g openclaw"
+        echo "  启动: openclaw"
+      fi
+      echo ""
+    fi
     
     # Gateway Token
     if [ -n "$GATEWAY_TOKEN" ]; then
@@ -520,9 +532,6 @@ main() {
   # 检测 OpenClaw 和 PicoClaw
   detect_openclaw
   detect_picoclaw
-
-  # 可选安装 OpenClaw
-  offer_install_openclaw
 
   echo ""
   info "安装目录: $INSTALL_DIR"
