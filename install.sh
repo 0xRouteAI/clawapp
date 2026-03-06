@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ClawApp 一键部署脚本
-# 用法: curl -fsSL https://raw.githubusercontent.com/qingchencloud/clawapp/main/install.sh | bash
+# 用法: curl -fsSL https://raw.githubusercontent.com/0xRouteAI/clawapp/main/install.sh | bash
 # 或者: bash install.sh
 set -e
 
@@ -285,7 +285,7 @@ setup_repo() {
     ok "代码已更新"
   else
     info "正在克隆 ClawApp..."
-    git clone https://github.com/qingchencloud/clawapp.git "$INSTALL_DIR"
+    git clone https://github.com/0xRouteAI/clawapp.git "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     ok "代码克隆完成"
   fi
@@ -497,7 +497,7 @@ finish() {
     echo "     启动命令: openclaw"
     echo ""
   fi
-  echo "  � 文档: https://github.com/qingchencloud/clawapp"
+  echo "  � 文档: https://github.com/0xRouteAI/clawapp"
   echo "  💬 社区: https://discord.com/invite/U9AttmsNHh"
   echo ""
 }

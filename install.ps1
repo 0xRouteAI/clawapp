@@ -1,5 +1,5 @@
 # ClawApp 一键部署脚本 (Windows PowerShell)
-# 用法: irm https://raw.githubusercontent.com/qingchencloud/clawapp/main/install.ps1 | iex
+# 用法: irm https://raw.githubusercontent.com/0xRouteAI/clawapp/main/install.ps1 | iex
 # 或者: powershell -ExecutionPolicy Bypass -File install.ps1
 #Requires -Version 5.1
 
@@ -237,7 +237,7 @@ function Setup-Repo {
     }
     else {
         Write-Info "正在克隆 ClawApp..."
-        git clone https://github.com/qingchencloud/clawapp.git $InstallDir
+        git clone https://github.com/0xRouteAI/clawapp.git $InstallDir
         Set-Location $InstallDir
         Write-Ok "代码克隆完成"
     }
@@ -472,7 +472,7 @@ function Show-Finish {
         Write-Host "     启动命令: openclaw"
         Write-Host ""
     }
-    Write-Host "  文档: https://github.com/qingchencloud/clawapp"
+    Write-Host "  文档: https://github.com/0xRouteAI/clawapp"
     Write-Host "  社区: https://discord.com/invite/U9AttmsNHh"
     Write-Host ""
 }
